@@ -1,5 +1,5 @@
 /*
-* SimplerModal 1.0 - jQuery Plugin
+* SimplerModal 1.0.1 - jQuery Plugin
 * Copyright (c) 2011 James Treworgy 
 * http://www.outsharked.com/simplermodal
 *
@@ -11,13 +11,17 @@
 */
 
 /* Differences from stock: 
-   - iFrame is not created automatically for IE6, instead "select" controls are hidden
-   - $.modal.iframe() and $.modal.url() to load content from a URL asynchronously
-   - $.modal.block() and $.modal.unblock() to allow user control of UI blocking
-   - options to ensure dialog stays within window confines
-   - better "close" handling
-   - Rewrite of sizing code: Account for margins on container when resizing automatically
-   - Options to ensure dialog always fits in window confines
+(1.0.1)
+- Can call $.modal.getFromUrl('#id') to get content from the current page instead of loading.
+  "id" can be an id or an anchor; if an anchor, it will extract content until the next anchor is found.
+(1.0)
+- iFrame is not created automatically for IE6, instead "select" controls are hidden
+- $.modal.iframe() and $.modal.url() to load content from a URL asynchronously
+- $.modal.block() and $.modal.unblock() to allow user control of UI blocking
+- options to ensure dialog stays within window confines
+- better "close" handling
+- Rewrite of sizing code: Account for margins on container when resizing automatically
+- Options to ensure dialog always fits in window confines
 */
 (function ($) {
     $.fn.modal = function (options) {
@@ -77,6 +81,7 @@
         iframeSrc: null,
         iframeWait: true,
         ajaxError: null,
+        ajaxData: {},
         modal: true,
         opacity: 50,
         minHeight: 200,
@@ -109,8 +114,10 @@
 
         iframe.modal($.extend({}, options, { iframeSrc: url }));
     };
-    $.modal.url = function (url, options) {
-        $.modal.init(options);
+    $.modal.url = function (url, options, ajaxData) {
+        // ensure ajaxData gets set to nothing if not passed
+        var opts = $.extend({}, options, { ajaxData: ajaxData });
+        $.modal.init(opts);
         $.modal.impl.loadFromUrl(url);
     };
     /*
@@ -157,16 +164,21 @@
         }
 
         function hideSelects() {
-            if (hiddenSelects.length) { return; }
-            $('select').each(function () {
+            if (hiddenSelects.length || !quirks) { return; }
+            $('select:visible').each(function () {
                 hiddenSelects.push(this);
                 $(this).css("visibility", "hidden");
             });
         }
+
         function showSelects() {
-            var i = hiddenSelects.length;
+            if (!quirks) { return; }
+            var s, i = hiddenSelects.length;
             while (i--) {
-                $(hiddenSelects[i]).css("visibility", "visible");
+                s = hiddenSelects[i];
+                if (s) {
+                    $(s).css("visibility", "visible");
+                }
             }
             hiddenSelects = [];
         }
@@ -198,8 +210,6 @@
             me.minHeight = options.minHeight;
             me.minWidth = options.minWidth;
         };
-        // populate with current state of dialog objects. This is separate from the "configure" method because
-        // sometimes we want to capture data about the inner content size before it's ready to render (e.g. "realWidth/realHeight")
         WinSize.prototype.capture = function (objects) {
             var me = this;
             me.overlay = objects.overlay;
@@ -207,29 +217,29 @@
             me.iframe = objects.iframe;
             me.wrap = objects.wrap;
             me.data = objects.data;
-            // difference between actual space consumed by Container, and the width/height properties
-            if (me.container) {
-                me.heightPad = (me.container.outerHeight(true) - me.container.height());
-                me.widthPad = (me.container.outerWidth(true) - me.container.width());
-
-
-                // difference between width/height properties and space available
-                me.innerWidthPad = (me.container.width() - me.container.innerWidth());
-                me.innerHeightPad = (me.container.height() - me.container.innerHeight());
-
-                me.dataWidth = data ? data.outerWidth(true) : options.maxWidth - me.widthPad - me.innerWidthPad;
-                me.dataHeight = data ? data.outerHeight(true) : options.maxHeight - me.heightPad - me.innerHeightPad;
-            }
-
-            // The space actually consumed by the content + the container
-            me.realWidth = me.dataWidth + me.innerWidthPad;
-            me.realHeight = me.dataHeight + me.innerHeightPad;
-
-            //            me.realWidth = me.dataWidth + (me.container.outerWidth() - me.container.innerWidth());
-            //            me.realHeight = me.dataHeight + (me.container.outerHeight() - me.container.innerHeight());
-
 
         };
+        // populate with current state of dialog objects. This is separate from the "configure" method because
+        // sometimes we want to capture data about the inner content size before it's ready to render (e.g. "realWidth/realHeight")
+        WinSize.prototype.captureWrapper = function () {
+            var me = this;
+
+            me.wrapWidthPad = me.wrap ? (me.wrap.outerWidth(true) - me.wrap.width()) : 0;
+            me.wrapHeightPad = me.wrap ? (me.wrap.outerHeight(true) - me.wrap.height()) : 0;
+
+            me.ctrWidthPad = me.container ? (me.container.outerWidth(true) - me.container.width()) : 0;
+            me.ctrHeightPad = me.container ? (me.container.outerHeight(true) - me.container.height()) : 0;
+
+        };
+        WinSize.prototype.captureDataWidth = function () {
+            var me = this;
+            me.dataWidth = me.data ? me.data.outerWidth(true) : options.maxWidth - me.wrapWidthPad;
+        };
+        WinSize.prototype.captureDataHeight = function () {
+            var me = this;
+            me.dataHeight = me.data ? me.data.outerHeight(true) : options.maxHeight - me.wrapHeightPad;
+        };
+
         WinSize.prototype.configure = function () {
             var me = this, height, width,
              bsh = 'document.body.scrollHeight', bsw = 'document.body.scrollWidth',
@@ -258,13 +268,13 @@
                 var te, le, left, top, p = options.position;
                 $.each(Array.prototype.slice.call(arguments, 0), function (i, el) {
                     if (el) {
-                        var s = el[0].style, mleft = el.css('margin-left').replace(/px/,''), mtop = el.css('margin-top').replace(/px/,'');
+                        var s = el[0].style, mleft = el.css('margin-left').replace(/px/, ''), mtop = el.css('margin-top').replace(/px/, '');
                         s.position = 'absolute';
                         if (p && p.constructor === Array) {
                             top = p[0]
 					            ? typeof p[0] === 'number' ? p[0].toString() : p[0].replace(/px/, '')
 					            : el.css('top').replace(/px/, '');
-                                    te = top.indexOf('%') === -1
+                            te = top.indexOf('%') === -1
 					            ? top + ' + (t = ' + st + ' ? ' + st + ' : ' + bst + ') + "px"'
 					            : parseInt(top.replace(/%/, ''), 10)
                                     + ' * ((' + ch + ' || ' + bch + ') / 100) + (t = ' + st + ' ? ' + st + ' : ' + bst + ') + "px"';
@@ -278,8 +288,8 @@
                             }
                         }
                         else {
-                            te = '(' + ch + ' || ' + bch + ') / 2 - ((this.offsetHeight+'+mtop+') / 2) + (t = ' + st + ' ? ' + st + ' : ' + bst + ') + "px"';
-                            le = '(' + cw + ' || ' + bcw + ') / 2 - ((this.offsetWidth+'+mleft+') / 2) + (t = ' + sl + ' ? ' + sl + ' : ' + bsl + ') + "px"';
+                            te = '(' + ch + ' || ' + bch + ') / 2 - ((this.offsetHeight+' + mtop + ') / 2) + (t = ' + st + ' ? ' + st + ' : ' + bst + ') + "px"';
+                            le = '(' + cw + ' || ' + bcw + ') / 2 - ((this.offsetWidth+' + mleft + ') / 2) + (t = ' + sl + ' ? ' + sl + ' : ' + bsl + ') + "px"';
                         }
                         s.removeExpression('top');
                         s.removeExpression('left');
@@ -293,8 +303,15 @@
             //dimension needs to be: the space consumed by the data, plus the difference between the height/width properties of the container & the actual space consumed by the container.
             // maximum size is correct when limited by viewport.
 
-            height = Math.min(me.maxHeight - me.heightPad, Math.max(me.realHeight, me.minHeight) + me.heightPad);
-            width = Math.min(me.maxWidth - me.widthPad, Math.max(me.realWidth, me.minWidth) + me.widthPad);
+            height = Math.min(me.maxHeight - me.ctrHeightPad, Math.max(me.dataHeight, me.minHeight) + me.wrapHeightPad);
+            width = Math.min(me.maxWidth - me.ctrWidthPad, Math.max(me.dataWidth, me.minWidth) + me.wrapWidthPad);
+
+            // check if we didn't use full width, but height is > max height, meaning a vscroll bar appeared 
+            // if so, add 20 px so it won't appear.
+            if (width < me.maxWidth - me.ctrWidthPad &&
+                height - me.ctrHeightPad < me.dataHeight + me.wrapHeightPad) {
+                width = Math.min(me.maxWidth - me.ctrWidthPad, width + 20);
+            }
 
             if (me.overlay) {
                 me.overlay.width(me.winWidth)
@@ -347,6 +364,8 @@
 				.css($.extend(options.containerCss, {
 				    display: 'none',
 				    position: 'fixed',
+				    width: winSize.maxWidth,
+				    height: winSize.maxHeight,
 				    zIndex: options.zIndex + 2
 				}));
 
@@ -363,8 +382,8 @@
             wrap = $('<div></div>')
 			    .attr('tabIndex', -1)
 			    .addClass('simplemodal-wrap')
-                .css({ height: '100%', outline: 0, width: '100%' })
-			    .appendTo(container);
+                .css({ "width": "100%", "height": "100%" })
+                .appendTo(container);
 
             // add styling and attributes to the data
             // append to body to get correct dimensions, then move to wrap
@@ -376,12 +395,13 @@
                 }
             }
             winSize.capture(me.data());
+            winSize.captureWrapper();
+            winSize.captureDataWidth();
 
-            $(window).bind('resize.simplemodal', me.resize);
             if (data) {
-                wrap.append(data);
+                data.appendTo(wrap);
             }
-            //data.appendTo(wrap);
+
             if (iframe) {
                 iframe
                 .css($.extend(options.iframeCss, {
@@ -406,8 +426,8 @@
                 if (options.iframeWait) {
                     iframe.bind('load.simplemodal', me.show);
                 }
-
             }
+            $(window).bind('resize.simplemodal', me.resize);
         }
 
         me.init = function (opts) {
@@ -431,27 +451,37 @@
         // internal method
         me.main = function (source) {
             // Must be active now - otherwise indicates an async operation was canceled
-            if (!active) {
+            var isInDom;
+            if (!active || !source) {
                 return;
             }
             // determine how to handle the data based on its type
             if (typeof source === 'object') {
                 // convert DOM object to a jQuery object
                 data = source instanceof jQuery ? source : $(source);
-                if (!options.persist) {
-                    //inputs = data.find(inputSelector);
-                    data = data.clone();
-                    // inputsRef = data.find(inputSelector);
-                }
-                if (data[0].tagName === 'IFRAME') {
-                    iframe = $(data[0]);
-                    iframeSrc = iframe.attr('src') || options.iframeSrc;
-                    iframe.attr('src', '');
-                    data = null;
-                } else {
-                    if (inDom(data)) {
-                        dataParent = data.parent();
-                        dataDisplay = data.css('display');
+
+                if (data.length) {
+                    if (data[0].tagName === 'IFRAME') {
+                        iframe = $(data[0]);
+                        iframeSrc = iframe.attr('src') || options.iframeSrc;
+                        iframe.attr('src', '');
+                        data = null;
+                    } else {
+
+                        isInDom = inDom(data);
+                        if (isInDom) {
+                            dataParent = source.parent();
+                            dataDisplay = source.css('display');
+                        } else {
+                            data = $('<span></span>').append(data);
+                        }
+                        if (isInDom) { showSelects(); }
+                        if (!options.persist) {
+                            // need to reshow before cloning, then hide, in quirks mode. 
+
+                            data = data.clone();
+                            if (isInDom) { hideSelects(); }
+                        }
                     }
                 }
             }
@@ -503,9 +533,7 @@
             winSize.capture({ overlay: overlay });
             winSize.configure();
 
-            if (quirks) {
-                hideSelects();
-            }
+            hideSelects();
 
             overlay.show();
 
@@ -587,6 +615,8 @@
             if (iframe) {
                 iframe.show();
             }
+            winSize.captureDataHeight();
+
             if (data) {
                 data.show();
             }
@@ -615,7 +645,7 @@
 
             // Restore the dialog source to its original location if it came from the DOM
             if (dataParent) {
-                dataParent.append(data).css(dataDisplay, data);
+                dataParent.append(data.css("display", dataDisplay));
                 dataParent = null;
             }
 
@@ -625,9 +655,7 @@
             $(document).unbind('keydown.simplemodal');
 
             // Restore hidden SELECT elements in IE6
-            if (quirks) {
-                showSelects();
-            }
+            showSelects();
             if (container) {
                 container.remove();
                 container = null;
@@ -645,6 +673,11 @@
 
         };
         me.loadFromUrl = function (url) {
+            var lastAsyncID,
+                cleanurl = url,
+                anchor = null,
+                parts = url.split('#');
+
             function extractBodyHtml(obj) {
                 var regex = /<body.*?>([\s\S]*?)<\/body>/g;
                 if (regex.test(obj)) {
@@ -653,10 +686,34 @@
                     return obj;
                 }
             }
-            var lastAsyncID,
-                cleanurl = url,
-                anchor = null,
-                parts = url.split('#');
+            // called on ajax load success, or immediately if in same page
+            function loaded(obj) {
+                var cur, sub,
+                    content = obj instanceof jQuery ? obj : $(extractBodyHtml(obj));
+                if (anchor) {
+                    sub = content.find('#' + anchor).children();
+                    if (sub.length > 0) {
+                        content = sub;
+                    } else {
+                        // if no ID, then look for an anchor tag.
+                        content = content.find("a[name='" + anchor + "']");
+                        cur = content.next();
+
+                        while (cur && cur.length) {
+                            if (!cur.is("a[name]")) {
+                                content = content.add(cur);
+                                cur = cur.next();
+                            } else {
+                                cur = null;
+                            }
+                        }
+                    }
+                }
+                // ensure that a new operation wasn't started as a result of previous one being canceled.
+                if (asyncID === lastAsyncID) {
+                    $.modal.impl.main(content);
+                }
+            }
 
             if (active) {
                 return;
@@ -670,31 +727,28 @@
                 anchor = parts[1];
             }
             lastAsyncID = ++asyncID;
-            $.ajax({
-                url: cleanurl,
-                type: "GET",
-                dataType: "html",
-                async: true,
-                success: function (obj) {
-                    var content = $(extractBodyHtml(obj));
-                    if (anchor) {
-                        content = content.find('#' + anchor).children();
-                    }
-                    // ensure that a new operation wasn't started as a result of previous one being canceled.
-                    if (asyncID === lastAsyncID) {
-                        $.modal.impl.main(content);
-                    }
-                },
-                error: function (data, textStatus, jqXHR) {
-                    if ($.isFunction(options.ajaxError)) {
-                        options.ajaxError.call(null, data, textStatus, jqXHR);
-                    } else {
-                        if (jqXHR.responseText) {
-                            throw (jqXHR.responseText);
+
+            if (!cleanurl && anchor) {
+                loaded($('body'));
+            } else {
+                $.ajax({
+                    url: cleanurl,
+                    type: "GET",
+                    data: options.ajaxData,
+                    dataType: "html",
+                    async: true,
+                    success: loaded,
+                    error: function (data, textStatus, jqXHR) {
+                        if ($.isFunction(options.ajaxError)) {
+                            options.ajaxError.call(null, data, textStatus, jqXHR);
+                        } else {
+                            if (jqXHR.responseText) {
+                                throw (jqXHR.responseText);
+                            }
                         }
                     }
-                }
-            });
+                });
+            }
         };
         return me;
     } ());

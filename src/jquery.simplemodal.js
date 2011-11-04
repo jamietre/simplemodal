@@ -13,7 +13,7 @@
 /* Differences from stock: 
 (1.0.1)
 - Can call $.modal.getFromUrl('#id') to get content from the current page instead of loading.
-  "id" can be an id or an anchor; if an anchor, it will extract content until the next anchor is found.
+"id" can be an id or an anchor; if an anchor, it will extract content until the next anchor is found.
 (1.0)
 - iFrame is not created automatically for IE6, instead "select" controls are hidden
 - $.modal.iframe() and $.modal.url() to load content from a URL asynchronously
@@ -336,7 +336,7 @@
 
             }
             if (me.iframe) {
-                me.iframe.css({ width: "100%", height: "100%" });
+                me.iframe.css({ width: "100%", height: "99%" });
             }
             //} else {
             if (quirks) {
@@ -472,8 +472,8 @@
                         if (isInDom) {
                             dataParent = source.parent();
                             dataDisplay = source.css('display');
-                        } else {
-                            data = $('<span></span>').append(data);
+                        //} else {
+                        //    data = $('<span></span>').append(data);
                         }
                         if (isInDom) { showSelects(); }
                         if (!options.persist) {
@@ -615,8 +615,9 @@
             if (iframe) {
                 iframe.show();
             }
-            winSize.captureDataHeight();
 
+
+            winSize.captureDataHeight();
             if (data) {
                 data.show();
             }
